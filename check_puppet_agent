@@ -86,6 +86,9 @@
 # 20160315  J. Yaworski Add -v, allowing to pass a version to compare
 # 20160815  L. Buriola  Add -E to show first error on output
 # 20170426  benwtr      Detect failure to retrieve catalog from server as a warning.
+# 20180324  deric       Discard puppet config error (logging) output
+
+declare -A puppet_config_list
 
 # FUNCTIONS
 result () {
@@ -107,6 +110,7 @@ result () {
    11) echo "INFO: Puppet agent is version $version, but should be $wanted_version. $PERF_DATA";rc=0 ;;
    12) echo "UNKNOWN: last_run_report.yaml not found, not readable or incomplete";rc=3 ;;
    13) echo "WARNING: Failed to retrieve catalog on last run.";rc=1 ;;
+   14) echo "UNKNOWN: No sudo executable found";rc=3 ;;
   esac
   exit $rc
 }
@@ -149,13 +153,18 @@ parse_yaml () {
 
 # Get first error from last_run_report.yaml
 get_first_error() {
-  grep_cmd="/bin/grep -B 3 -A 1"
-  first_error_time=$($grep_cmd "status: failure" $lastrunreport | grep "time: " | sort -n | head -1)
-  first_error=$($grep_cmd "$first_error_time" $lastrunreport | grep "message: " | sed 's/.*message: //' | head -1)
+  grep_cmd="/bin/grep -B 4 -A 1 -m 1"
+  first_error=$($grep_cmd "status: failure" $lastrunreport | grep -A 2 "message: " | sed -E '/ +message: \|-/d;s/ +message: +//g' | sed -E 's/  +//g')
   echo "FIRST_ERROR ($first_error)"
 }
 
 # SCRIPT
+# Fix home directory if needed
+# On Gentoo otherwise we get
+# UNKNOWN: Internal error: Puppet version unknown from Error: Could not initialize global default settings: Permission denied @ dir_s_mkdir - /root/.puppetlabs
+# this happens because $HOME is not set to the user one
+export HOME=$(eval echo "~$(whoami)")
+#
 while getopts "c:d:l:s:r:w:v:PEh" opt; do
   case $opt in
     c)
@@ -202,11 +211,7 @@ while getopts "c:d:l:s:r:w:v:PEh" opt; do
 done
 
 parse_puppet_config () {
-  echo "$puppet_config_output" | while read key value; do
-    if [ "$key" = "$1" ]; then
-        echo "${value#= }"
-    fi
-  done
+  [ ${puppet_config_list[$1]+abc} ] && echo ${puppet_config_list[$1]} || echo ""
 }
 
 [ -z "$HOME" ] && export HOME=$(getent passwd `whoami` | cut -d: -f6)  # Some clean environment situations make puppet -V fail.
@@ -215,6 +220,8 @@ parse_puppet_config () {
 PATH="$PATH:/opt/puppetlabs/bin"
 # Find location of puppet executable.
 PUPPET=$(which puppet) || result 8
+# Check if sudo installed
+which sudo 1>/dev/null 2>&1 || result 14
 
 # Find out Puppet major version to determine configprint syntax.
 puppet_major_version=$($PUPPET -V|cut -d. -f1)
@@ -234,7 +241,14 @@ case $puppet_major_version in
     ;;
 esac
 
-puppet_config_output="$($puppet_config_print)"
+# Construct the associative array puppet config list
+while read key value
+do
+  puppet_config_list[$key]=${value#= }
+done <<_EOT_
+`$puppet_config_print 2> /dev/null`
+_EOT_
+
 # construct WARN and CRIT times based on runinterval plus a safety buffer
 # if they have not already been explicitly set
 runinterval=$(parse_puppet_config "runinterval")
@@ -259,6 +273,8 @@ splay=$(parse_puppet_config "splay")
 
 # If the lastrunreport is not given as a param try to find it ourselves.
 [ -z "$lastrunreport" ] && lastrunreport=$(parse_puppet_config "lastrunreport")
+# Check if the lastrunreport is readable
+[ -r "$lastrunreport" ] || result 12
 # Check if state file exists.
 [ -n "$SHOW_ERROR" ] && ( [ -s $lastrunreport -a -r $lastrunreport ] || result 12 )
 
@@ -315,7 +331,7 @@ if [ -n "$SHOW_ERROR" ] ; then
 fi
 
 # If the last run failed to retrieve the catalog from the server
-grep -q 'message: "Could not retrieve catalog from remote server' $lastrunreport && result 13
+grep -q 'Could not retrieve catalog from remote server' $lastrunreport && result 13
 
 # Check when last run happened.
 last_run=$_time_last_run

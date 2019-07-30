@@ -78,11 +78,8 @@
 # 20151229  A.Swen      Fix bug in PERF_DATA (replace compset by set).
 #                       Prettify $PERF_DATA output.
 # 20160125  Paul B.     Downgrade "daemon not running" and "last run had 1+ errors" from CRITICAL to WARNING
-# 20160126  Paul B.     Puppet 4 doesn't play nicely with PATH so adjusted some checks to make it work.
-#                       Also commented out the parse_yaml() function since it wasn't working.
 # 20160201  S. Sams     Changes to PERF_DATA output format to increase compatibility with Nagios Plugin guidelines.
 #                       Add compatibility with Puppet 4.x
-# 20160203  Paul B.     Removed the Puppet 4 hacks I put in place a week ago.
 # 20160315  J. Yaworski Add -v, allowing to pass a version to compare
 # 20160815  L. Buriola  Add -E to show first error on output
 # 20170426  benwtr      Detect failure to retrieve catalog from server as a warning.
